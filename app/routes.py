@@ -1,69 +1,75 @@
 from types import MethodType
-from flask import Blueprint, jsonify
-
-class Book:
-    def __init__(self, id, title, description):
-        self.id = id
-        self.title = title
-        self.description = description
-
-books = [
-    Book(1, "Where the Crawdads Sing", "A good book about a swamp girl"),
-    Book(2, "The Vanishing Half", "A story about two estranged sisters entwined lives"),
-    Book(3, "Educated", "A memior about a young girl escaping religious cult.")
-] 
-
-# is hello_world our endpoint?
-hello_world_bp = Blueprint("hello_world_bp", __name__)
+from flask import Blueprint, jsonify, make_response, request
+from app import db
+from app.models.book import Book
 
 books_bp = Blueprint("books_bp", __name__, url_prefix="/books")
 
-@books_bp.route("", methods=['GET'])
+@books_bp.route('', methods=['POST', 'GET'])
 def handle_books():
-    books_response = []
+    if request.method == 'POST':
+        request_body = request.get_json()
 
-    for book in books:
-        books_response.append({
-            "id": book.id,
-            "title": book.title,
-            "description": book.description
-        })
-    return jsonify(books_response)
+        if 'title' not in request_body or 'description' not in request_body:
+            return make_response("Invalid Request", 400)
 
-@books_bp.route('/<book_id>', methods=['GET'])
+        new_book = Book(
+            title = request_body['title'],
+            description = request_body['description']
+        )
+        db.session.add(new_book)
+        db.session.commit()
+
+        return make_response(
+            f'Book {new_book.title} created', 201
+        )
+
+    elif request.method == 'GET':
+        title_from_url = request.args.get('title')
+        if title_from_url:
+            books = Book.query.filter_by(title=title_from_url)
+        else:
+            books = Book.query.all()
+
+        books_response = []
+        for book in books:
+            books_response.append(book.to_dict())
+        return jsonify(books_response)
+
+@books_bp.route('/<book_id>', methods=['GET', 'PUT', 'DELETE'])
 def handle_book(book_id):
-    book_id = int(book_id)
-    for book in books:
-        if book.id == book_id:
-            return {
-                "id": book.id,
-                "title": book.title,
-                "description": book.description
-            }
-
-
-
-@hello_world_bp.route('/hello-world', methods=["GET"])
-def get_hello_world():
-    my_response = "Hello, World!"
-    return my_response
-
-@hello_world_bp.route('/hello-world/JSON', methods=['GET'])
-def hello_world_json():
-    return {
-        "name": "Mariah",
-        "message": "Ciao!",
-        "hobbies": "coding"
-    }, 200
-
-@hello_world_bp.route("/broken-endpoint-with-broken-server-code")
-def broken_endpoint():
-    response_body = {
-        "name": "Ada Lovelace",
-        "message": "Hello!",
-        "hobbies": ["Fishing", "Swimming", "Watching Reality Shows"]
-    }
-    new_hobby = "Surfing"
-    response_body["hobbies"].append(new_hobby)
     
-    return response_body
+    book = Book.query.get(book_id)
+
+    if request.method == 'GET':
+        if not book:
+            return {
+                "message": f"Book {book_id} does not exist"
+            }, 404
+        return jsonify(book.to_dict())
+    elif request.method == 'PUT':
+        request_body = request.get_json()
+        if not 'title' in request_body or not 'description' in request_body:
+            return {
+                "message": "Request requires both a title and description"
+            }, 400
+        book.title = request_body['title']
+        book.description = request_body['description']
+
+        #Save Action
+        db.session.commit()
+
+        return jsonify(book.to_dict()), 200
+
+    elif request.method == 'DELETE':
+        if not book:
+            return {
+                "message": f"Book not found"
+            }, 404
+
+        db.session.delete(book)
+        db.session.commit()
+
+        return {
+            "Message": f"Book with title {book.title} has been deleted"
+        }, 200
